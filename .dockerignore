@@ -1,0 +1,12 @@
+target/
+.idea/
+*.iml
+.vscode/
+.git/
+.gitignore
+.env
+*.log
+*.md
+Caddyfile
+docker-compose.yml
+.env.example

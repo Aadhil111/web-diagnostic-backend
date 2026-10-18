@@ -1,0 +1,35 @@
+# Build output (Maven)
+target/
+*.class
+*.jar
+*.war
+hs_err_pid*
+
+# IDE and editor files
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+.settings/
+.classpath
+.project
+.factorypath
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+
+# Environment files and secrets (keep the committed template)
+.env
+.env.*
+!.env.example
+*.pem
+*.key

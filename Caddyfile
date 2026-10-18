@@ -1,0 +1,54 @@
+{
+	# Contact address for Let's Encrypt expiry notices.
+	email {$ACME_EMAIL}
+}
+
+# Caddy gets and renews the HTTPS certificate for this name automatically
+# and redirects http:// to https://.
+{$DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+
+	# The diagnostic API is POST-only in production. A GET with the URL in the query string would let any web
+	# page make visitors' browsers trigger scans (a "simple" cross-origin request needs no preflight) and would
+	# put tested URLs into history and proxy logs. The backend still implements GET for local use.
+	@diagnosticGet {
+		path /api/v1/diagnostic
+		method GET HEAD
+	}
+	handle @diagnosticGet {
+		header Allow POST
+		respond "Use POST /api/v1/diagnostic with a JSON body." 405
+	}
+
+	handle /api/* {
+		request_body {
+			max_size 8KB
+		}
+		reverse_proxy backend:8080 {
+			# Caddy sets X-Forwarded-For / -Proto itself and discards any copy sent by the client,
+			# which is what makes the backend's per-client rate limit trustworthy.
+			health_uri /api/v1/health
+			health_interval 10s
+		}
+	}
+
+	# Everything else is the website (static files from the website repository's public/ folder).
+	handle {
+		root * /srv/website
+		header {
+			Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+			Referrer-Policy "no-referrer"
+			Cache-Control "no-cache"
+		}
+		file_server
+	}
+
+	# Access logging is deliberately left off: tested URLs and addresses are not written to disk.
+}

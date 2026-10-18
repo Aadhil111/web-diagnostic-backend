@@ -1,0 +1,100 @@
+server:
+  port: 8080
+  shutdown: graceful           # finish in-flight checks before stopping
+
+spring:
+  application:
+    name: web-diagnostic-system
+  # Spring Security is used for its filter chain and CORS only. There are no users: SecurityConfig declares an
+  # empty UserDetailsService so no default user / generated password is created.
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+  threads:
+    virtual:
+      enabled: true
+  jackson:
+    default-property-inclusion: non_null
+
+diagnostic:
+  connect-timeout: 8s
+  read-timeout: 12s
+  overall-timeout: 30s                    # hard cap for one whole diagnostic
+  dns-timeout: 5s                         # per DNS lookup (initial host and every redirect hop)
+  max-redirects: 10
+  user-agent: "WebDiagnosticSystem/1.0"
+  allowed-ports: [80, 443, 8080, 8443]
+  allow-private-addresses: false          # set true ONLY for local development (see dev profile)
+  inspect-untrusted-certificates: true    # still read issuer/expiry from a certificate that failed validation
+
+  # One failed connection is not proof a site is down. 2 = one retry of the first request.
+  connection-attempts: 2
+  retry-delay: 500ms
+
+  rate-limit-per-minute: 30               # per client address
+  max-concurrent-diagnostics: 50          # more than this at once -> HTTP 503 BUSY
+  max-concurrent-dns-lookups: 64          # a DNS lookup cannot be interrupted; this caps how many may hang at once
+  keep-query-string: false                # privacy: query strings often contain tokens
+
+  # Which web origins may call the API from a browser. Nothing is allowed by default.
+  cors:
+    extension-ids: []                     # Chrome extension ids (32 letters a-p); REQUIRED in the prod profile
+    allowed-origins: []                   # website frontends, e.g. https://diagnose.example.com (no path, no wildcard)
+    allow-any-extension: false            # development only (the dev profile turns it on)
+    allow-localhost: false                # development only (the dev profile turns it on)
+
+logging:
+  level:
+    com.aadil.webdiagnostic: INFO
+  pattern:
+    # Every log line carries the request id from RequestIdFilter.
+    level: "%5p [%X{requestId}]"
+
+---
+# Local development. Activate with --spring.profiles.active=dev
+spring:
+  config:
+    activate:
+      on-profile: dev
+
+diagnostic:
+  allow-private-addresses: true   # lets you point it at localhost while building
+  cors:
+    allow-localhost: true         # lets a local website frontend call the API; never enabled in prod
+    allow-any-extension: true     # lets an unpacked Chrome extension call the API without configuring its id; never in prod
+
+logging:
+  level:
+    com.aadil.webdiagnostic: DEBUG
+
+---
+# Production behind a reverse proxy you control (Caddy, nginx, ALB).
+# Activate with --spring.profiles.active=prod
+spring:
+  config:
+    activate:
+      on-profile: prod
+
+server:
+  # Behind a proxy every request arrives from the proxy's address. The RemoteIpValve ("native")
+  # swaps it for the real client address from X-Forwarded-For, so the rate limit counts each
+  # user separately. ONLY safe when port 8080 is not reachable except through the proxy, and
+  # the proxy overwrites any X-Forwarded-For a caller sends. internal-proxies limits whose
+  # header is believed to private (Docker / VPC) addresses.
+  forward-headers-strategy: native
+  tomcat:
+    remoteip:
+      remote-ip-header: X-Forwarded-For
+      protocol-header: X-Forwarded-Proto
+      internal-proxies: '10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}'
+
+diagnostic:
+  cors:
+    # Exactly the extension(s) allowed to call this API, e.g. DIAGNOSTIC_CORS_EXTENSION_IDS=abcdefghijklmnopabcdefghijklmnop
+    # (comma-separated for several). Startup fails if this AND allowed-origins are both empty.
+    extension-ids: ${DIAGNOSTIC_CORS_EXTENSION_IDS:}
+    # Exact origin(s) of your website frontend (comma-separated). Optional if you only use the extension.
+    allowed-origins: ${DIAGNOSTIC_CORS_ALLOWED_ORIGINS:}
+
+logging:
+  level:
+    com.aadil.webdiagnostic: WARN

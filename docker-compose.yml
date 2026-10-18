@@ -1,0 +1,65 @@
+# Backend + Caddy on one host. Caddy terminates HTTPS, serves the website and proxies /api/* to Spring Boot.
+# Configuration comes from .env (copy .env.example).
+services:
+  backend:
+    build: .
+    image: web-diagnostic-backend:latest
+    container_name: wds-backend
+    restart: unless-stopped
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      # The website is served by Caddy from the same origin as the API.
+      DIAGNOSTIC_CORS_ALLOWED_ORIGINS: https://${DOMAIN:?Set DOMAIN in .env}
+      # Optional until the extension has an id; the prod profile needs at least one allowed origin.
+      DIAGNOSTIC_CORS_EXTENSION_IDS: ${EXTENSION_ID:-}
+    # "expose" keeps 8080 on the internal Docker network only. Never switch this to "ports":
+    # the rate limiter trusts X-Forwarded-For from private addresses, so only Caddy may reach it.
+    expose:
+      - "8080"
+    mem_limit: 768m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  caddy:
+    image: caddy:2
+    container_name: wds-caddy
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env}
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # The website repository's public/ folder. Compose refuses to start if it does not exist.
+      - type: bind
+        source: ${WEBSITE_DIR:-../web-diagnostic-website/public}
+        target: /srv/website
+        read_only: true
+        bind:
+          create_host_path: false
+      - caddy_data:/data        # certificates live here: keep this volume
+      - caddy_config:/config
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  caddy_data:
+  caddy_config:
